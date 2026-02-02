@@ -1,5 +1,5 @@
 Flask==3.0.0
-Pillow==10.3.0
+Pillow>=10.0.0,<11.0.0
 Pillow-Heif==0.15.0
 opencv-python-headless==4.8.1
 python-magic==0.4.27
