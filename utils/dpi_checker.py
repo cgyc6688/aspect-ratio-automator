@@ -1,5 +1,5 @@
+# utils/dpi_checker.py - Updated
 from PIL import Image
-import os
 
 def check_dpi(image_path):
     """Check DPI of image and return warning if needed"""
@@ -8,8 +8,13 @@ def check_dpi(image_path):
             # Get DPI from image info
             dpi = img.info.get('dpi', (72, 72))
             
-            if dpi[0] < 300 or dpi[1] < 300:
-                return "Low Resolution Detected: This file may not print clearly at large sizes."
+            # Handle different dpi formats
+            if isinstance(dpi, (int, float)):
+                if dpi < 300:
+                    return "Low Resolution Detected: This file may not print clearly at large sizes."
+            elif isinstance(dpi, tuple) and len(dpi) >= 2:
+                if dpi[0] < 300 or dpi[1] < 300:
+                    return "Low Resolution Detected: This file may not print clearly at large sizes."
             
             return None
     except Exception as e:
