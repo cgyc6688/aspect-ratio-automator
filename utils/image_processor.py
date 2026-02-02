@@ -1,6 +1,7 @@
 """
-Aspect Ratio Image Processor - Memory Optimized Version
+Aspect Ratio Image Processor - Memory Optimized Version with Preview Fix
 Optimized for Render.com free tier (512MB RAM limit)
+FIXED: Preview images not showing after adjustments
 """
 
 from PIL import Image, ImageOps
@@ -12,10 +13,10 @@ class ImageProcessor:
     """
     Memory-optimized image processor for Render.com deployment.
     Processes large images without exceeding 512MB memory limit.
+    FIXED: Returns correct preview filenames for frontend display.
     """
     
-    # REDUCED TARGET DIMENSIONS BY 50% (Memory Optimization #1)
-    # Original sizes were causing memory overflow (~1.5GB total)
+    # REDUCED TARGET DIMENSIONS BY 50% (Memory Optimization)
     # New sizes are still good for print quality at 300 DPI
     RATIOS = {
         '2x3': (3600, 5400),      # 19.4 MP (was 7200x10800 = 77.8 MP)
@@ -46,8 +47,9 @@ class ImageProcessor:
         os.makedirs(self.processed_folder, exist_ok=True)
         
         # Load image metadata only (not full image) to check dimensions
-        self.image = None
         self.image_info = self._get_image_info()
+        
+        print(f"ImageProcessor initialized: {os.path.basename(image_path)}, session: {session_id[:8]}")
         
     def _get_image_info(self):
         """Get image dimensions without loading full image into memory."""
@@ -68,38 +70,63 @@ class ImageProcessor:
         """Create preview images for all ratios (memory optimized)."""
         previews = {}
         
+        print(f"Creating previews for session: {self.session_id[:8]}")
+        
         for ratio_name, (width, height) in self.RATIOS.items():
             try:
-                preview_path = os.path.join(
-                    self.processed_folder, 
-                    f"{self.session_id}_{ratio_name}_preview.jpg"
-                )
+                # CRITICAL: Use consistent naming convention
+                preview_filename = f"{self.session_id}_{ratio_name}_preview.jpg"
+                preview_path = os.path.join(self.processed_folder, preview_filename)
+                
+                print(f"Creating preview for {ratio_name} at {preview_path}")
                 
                 # Create preview with memory optimization
                 preview = self._create_crop_for_preview(width, height)
                 if preview:
                     # Resize for web display (small thumbnail)
                     preview.thumbnail((300, 300), Image.Resampling.LANCZOS)
-                    preview.save(preview_path, 'JPEG', quality=85, optimize=True)
                     
-                    previews[ratio_name] = {
-                        'url': f'/preview/{os.path.basename(preview_path)}',
-                        'dimensions': f"{width} x {height} px",
-                        'preview_size': '300x300 px'
-                    }
+                    # Save with optimization
+                    preview.save(
+                        preview_path, 
+                        'JPEG', 
+                        quality=85, 
+                        optimize=True,
+                        progressive=True  # Progressive JPEG for faster loading
+                    )
+                    
+                    # Verify file was created
+                    if os.path.exists(preview_path):
+                        file_size = os.path.getsize(preview_path) / 1024
+                        print(f"Preview created: {preview_filename} ({file_size:.1f} KB)")
+                        
+                        previews[ratio_name] = {
+                            'url': f'/preview/{preview_filename}',  # CRITICAL: This URL must match app.py route
+                            'dimensions': f"{width} x {height} px",
+                            'preview_size': '300x300 px'
+                        }
+                    else:
+                        print(f"ERROR: Preview file not created: {preview_path}")
+                        previews[ratio_name] = {
+                            'error': 'Failed to create preview file',
+                            'dimensions': f"{width} x {height} px"
+                        }
                 else:
+                    print(f"ERROR: Preview image creation failed for {ratio_name}")
                     previews[ratio_name] = {
-                        'error': 'Failed to create preview',
+                        'error': 'Failed to create preview image',
                         'dimensions': f"{width} x {height} px"
                     }
                     
             except Exception as e:
                 print(f"Error creating preview for {ratio_name}: {e}")
+                traceback.print_exc()
                 previews[ratio_name] = {
                     'error': str(e),
                     'dimensions': f"{width} x {height} px"
                 }
         
+        print(f"Previews created: {len(previews)} previews ready")
         return previews
     
     def _create_crop_for_preview(self, target_width, target_height):
@@ -110,15 +137,14 @@ class ImageProcessor:
         try:
             # Load image for this specific operation
             with Image.open(self.image_path) as img:
-                # MEMORY OPTIMIZATION #2: Resize large source images
+                # MEMORY OPTIMIZATION: Resize large source images
                 img = self._resize_if_too_large(img)
                 
-                # Calculate crop
+                # Calculate crop (center crop by default)
                 crop_image = self._calculate_crop(img, target_width, target_height)
                 if crop_image:
-                    # Resize to target dimensions
-                    return crop_image.resize((target_width, target_height), 
-                                            Image.Resampling.LANCZOS)
+                    # Resize to target dimensions for preview
+                    return crop_image.resize((target_width, target_height), Image.Resampling.LANCZOS)
                 return None
                 
         except Exception as e:
@@ -128,9 +154,20 @@ class ImageProcessor:
     def adjust_crop(self, ratio, x_offset=0, y_offset=0):
         """
         Adjust crop position for specific ratio.
-        Memory optimized: processes one image at a time.
+        FIXED: Returns preview filename (not path) for frontend.
+        
+        Args:
+            ratio: Aspect ratio name (e.g., '2x3', '3x4')
+            x_offset: Horizontal adjustment (-100 to 100)
+            y_offset: Vertical adjustment (-100 to 100)
+            
+        Returns:
+            Preview filename (e.g., 'sessionid_ratio_preview.jpg') or None if failed
         """
+        print(f"Adjusting crop for {ratio}, offset: x={x_offset}, y={y_offset}")
+        
         if ratio not in self.RATIOS:
+            print(f"ERROR: Invalid ratio: {ratio}")
             return None
             
         width, height = self.RATIOS[ratio]
@@ -138,18 +175,24 @@ class ImageProcessor:
         try:
             # Load image fresh for this operation
             with Image.open(self.image_path) as img:
+                print(f"Image loaded: {img.width}x{img.height}, mode: {img.mode}")
+                
                 # MEMORY OPTIMIZATION: Resize if too large
                 img = self._resize_if_too_large(img)
                 
                 # Calculate crop with offset
                 crop_image = self._calculate_crop(img, width, height, x_offset, y_offset)
                 if not crop_image:
+                    print(f"ERROR: Crop calculation failed for {ratio}")
                     return None
                 
-                # Resize to target
-                resized = crop_image.resize((width, height), Image.Resampling.LANCZOS)
+                print(f"Crop calculated: {crop_image.width}x{crop_image.height}")
                 
-                # Save full size for final output
+                # Resize to target dimensions
+                resized = crop_image.resize((width, height), Image.Resampling.LANCZOS)
+                print(f"Resized to target: {resized.width}x{resized.height}")
+                
+                # Save full size for final output (optional, for download)
                 output_filename = f"{self.session_id}_{ratio}_adjusted.jpg"
                 output_path = os.path.join(self.processed_folder, output_filename)
                 
@@ -160,17 +203,45 @@ class ImageProcessor:
                     resized = resized.convert('RGB')
                 
                 # Save with moderate quality to save space
-                resized.save(output_path, 'JPEG', quality=90, dpi=(300, 300), optimize=True)
-                
-                # Also save preview
-                preview_path = os.path.join(
-                    self.processed_folder,
-                    f"{self.session_id}_{ratio}_preview.jpg"
+                resized.save(
+                    output_path, 
+                    'JPEG', 
+                    quality=90, 
+                    dpi=(300, 300), 
+                    optimize=True,
+                    progressive=True
                 )
-                resized.thumbnail((300, 300), Image.Resampling.LANCZOS)
-                resized.save(preview_path, 'JPEG', quality=85, optimize=True)
+                print(f"Full size saved: {output_filename}")
                 
-                return preview_path
+                # CRITICAL: Save preview for frontend display
+                # Use consistent naming convention: sessionid_ratio_preview.jpg
+                preview_filename = f"{self.session_id}_{ratio}_preview.jpg"
+                preview_path = os.path.join(self.processed_folder, preview_filename)
+                
+                # Create thumbnail for preview
+                preview_img = resized.copy()  # Copy to avoid modifying original
+                preview_img.thumbnail((300, 300), Image.Resampling.LANCZOS)
+                
+                # Save preview with optimization
+                preview_img.save(
+                    preview_path, 
+                    'JPEG', 
+                    quality=85, 
+                    optimize=True,
+                    progressive=True
+                )
+                
+                # Verify preview was saved
+                if os.path.exists(preview_path):
+                    preview_size = os.path.getsize(preview_path) / 1024
+                    print(f"Preview saved: {preview_filename} ({preview_size:.1f} KB)")
+                    
+                    # CRITICAL: Return the filename (not path)
+                    # This is what app.py expects for the /preview/<filename> route
+                    return preview_filename
+                else:
+                    print(f"ERROR: Preview file not created at {preview_path}")
+                    return None
                 
         except Exception as e:
             print(f"Error in adjust_crop: {e}")
@@ -180,50 +251,73 @@ class ImageProcessor:
     def process_all_ratios(self, adjustments):
         """
         Process all ratios with adjustments.
-        MEMORY OPTIMIZATION #3: Process images one at a time.
+        MEMORY OPTIMIZATION: Process images one at a time.
         
         Args:
             adjustments: Dictionary of adjustments for each ratio
+                Format: {'2x3': {'x_offset': 10, 'y_offset': -5}, ...}
             
         Returns:
-            List of output file paths
+            List of output file paths for the final high-res images
         """
         output_files = []
         
-        # Extract base filename
+        print(f"Processing all ratios for session: {self.session_id[:8]}")
+        
+        # Extract base filename from original path
         original_name = os.path.basename(self.image_path)
+        
+        # Remove session_id_ prefix if present
         if '_' in original_name:
-            # Remove session_id_ prefix
-            base_name = '_'.join(original_name.split('_')[1:])
+            # Split and get everything after the first underscore (session_id)
+            parts = original_name.split('_', 1)
+            if len(parts) > 1:
+                base_name = parts[1]
+            else:
+                base_name = original_name
         else:
             base_name = original_name
+        
+        # Remove extension
         base_name = os.path.splitext(base_name)[0]
         
-        # Clean base name
-        base_name = "".join(c for c in base_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        # Clean base name for safe filenames
+        import re
+        base_name = re.sub(r'[^\w\s\-_.]', '', base_name)
+        base_name = base_name.replace(' ', '_')
         
-        # PROCESS ONE RATIO AT A TIME (Memory Optimization #3)
+        print(f"Base filename: {base_name}")
+        
+        # PROCESS ONE RATIO AT A TIME (Memory Optimization)
         for ratio_name, (width, height) in self.RATIOS.items():
             try:
-                print(f"Processing ratio: {ratio_name}")
+                print(f"Processing ratio: {ratio_name} ({width}x{height})")
                 
-                # Get adjustments for this ratio
+                # Get adjustments for this ratio (default to center if none)
                 adj = adjustments.get(ratio_name, {})
                 x_offset = adj.get('x_offset', 0)
                 y_offset = adj.get('y_offset', 0)
                 
+                print(f"  Using adjustments: x={x_offset}, y={y_offset}")
+                
                 # Load image fresh for EACH ratio (prevents memory buildup)
                 with Image.open(self.image_path) as img:
+                    print(f"  Image loaded: {img.width}x{img.height}")
+                    
                     # MEMORY OPTIMIZATION: Resize if too large
                     img = self._resize_if_too_large(img)
                     
                     # Calculate and create crop
                     crop_image = self._calculate_crop(img, width, height, x_offset, y_offset)
                     if not crop_image:
+                        print(f"  ERROR: Crop calculation failed for {ratio_name}")
                         continue
+                    
+                    print(f"  Crop created: {crop_image.width}x{crop_image.height}")
                     
                     # Resize to target dimensions
                     resized = crop_image.resize((width, height), Image.Resampling.LANCZOS)
+                    print(f"  Resized to: {resized.width}x{resized.height}")
                     
                     # Save with proper naming
                     output_filename = f"{base_name}_{ratio_name}.jpg"
@@ -232,20 +326,28 @@ class ImageProcessor:
                     # Preserve color profile
                     if img.mode == 'CMYK':
                         resized = resized.convert('CMYK')
+                        print(f"  Converted to CMYK")
                     else:
                         resized = resized.convert('RGB')
+                        print(f"  Converted to RGB")
                     
                     # Save with optimized settings
                     resized.save(
                         output_path, 
                         'JPEG', 
-                        quality=90,          # Reduced from 100 for memory/space
+                        quality=90,          # Good balance of quality and file size
                         dpi=(300, 300),
                         optimize=True,       # Enable JPEG optimization
                         progressive=True     # Progressive JPEG for web
                     )
                     
-                    output_files.append(output_path)
+                    # Verify file was saved
+                    if os.path.exists(output_path):
+                        file_size = os.path.getsize(output_path) / 1024 / 1024
+                        print(f"  Saved: {output_filename} ({file_size:.2f} MB)")
+                        output_files.append(output_path)
+                    else:
+                        print(f"  ERROR: File not saved: {output_path}")
                     
                     # Clear variables to help garbage collection
                     crop_image = None
@@ -256,11 +358,12 @@ class ImageProcessor:
                 traceback.print_exc()
                 continue
         
+        print(f"Processing complete: {len(output_files)} files created")
         return output_files
     
     def _resize_if_too_large(self, image):
         """
-        MEMORY OPTIMIZATION #2: Resize source image if it's too large.
+        MEMORY OPTIMIZATION: Resize source image if it's too large.
         Prevents processing multi-gigapixel images on limited memory.
         
         Args:
@@ -283,6 +386,7 @@ class ImageProcessor:
                 new_height = self.MAX_MEMORY_SAFE_DIMENSION
                 new_width = int(self.MAX_MEMORY_SAFE_DIMENSION * width / height)
             
+            print(f"  Resizing to: {new_width}x{new_height}")
             # Resize with high-quality algorithm
             return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
         
@@ -297,6 +401,7 @@ class ImageProcessor:
                 new_height = self.MAX_SOURCE_DIMENSION
                 new_width = int(self.MAX_SOURCE_DIMENSION * width / height)
             
+            print(f"  Resizing to: {new_width}x{new_height}")
             return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
         
         return image
@@ -313,7 +418,7 @@ class ImageProcessor:
             y_offset: Vertical adjustment (-100 to 100)
             
         Returns:
-            Cropped PIL Image object
+            Cropped PIL Image object or None if failed
         """
         img_width, img_height = image.size
         
@@ -350,12 +455,14 @@ class ImageProcessor:
         
         # Verify crop dimensions
         if right <= left or bottom <= top:
-            print(f"Invalid crop dimensions: {left},{top},{right},{bottom}")
+            print(f"ERROR: Invalid crop dimensions: {left},{top},{right},{bottom}")
             return None
         
         if right > img_width or bottom > img_height:
-            print(f"Crop out of bounds: {right}x{bottom} > {img_width}x{img_height}")
+            print(f"ERROR: Crop out of bounds: {right}x{bottom} > {img_width}x{img_height}")
             return None
+        
+        print(f"  Crop area: ({left},{top}) to ({right},{bottom}), size: {crop_width}x{crop_height}")
         
         # Perform crop
         return image.crop((left, top, right, bottom))
@@ -378,32 +485,56 @@ class ImageProcessor:
         }
 
 
-# Helper function for standalone testing
-def test_memory_optimization():
-    """Test the memory optimized processor."""
-    import sys
+# ============================================================================
+# TESTING FUNCTION
+# ============================================================================
+
+def test_image_processor():
+    """Test the image processor with a sample image."""
+    print("=== Testing Image Processor ===")
     
-    print("=== Memory Optimized Image Processor Test ===")
-    print("Features:")
-    print("1. 50% reduced target dimensions")
-    print("2. Automatic source image resizing for large images")
-    print("3. One-at-a-time processing to prevent memory buildup")
+    # Create a test image if none exists
+    test_image_path = "test_image.jpg"
+    if not os.path.exists(test_image_path):
+        print("Creating test image...")
+        from PIL import Image, ImageDraw
+        img = Image.new('RGB', (4000, 3000), color='blue')
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([1000, 1000, 3000, 2000], fill='red')
+        draw.text((1500, 1500), 'Test Image', fill='white')
+        img.save(test_image_path, 'JPEG', quality=95)
+        print(f"Test image created: {test_image_path}")
     
-    # Create a test instance
-    test_path = "test_image.jpg"
-    processor = ImageProcessor(test_path, "test_session", "test_output")
+    # Test the processor
+    session_id = "test_session_123"
+    processor = ImageProcessor(test_image_path, session_id, "test_output")
     
-    # Show memory estimates
-    mem_info = processor.get_memory_usage()
-    print(f"\nMemory Estimate: {mem_info}")
+    # Create previews
+    print("\n1. Creating previews...")
+    previews = processor.create_previews()
+    print(f"Created {len(previews)} previews")
     
-    print("\nTarget Ratios (50% reduced):")
-    for ratio, (w, h) in processor.RATIOS.items():
-        mp = (w * h) / 1000000
-        print(f"  {ratio}: {w}x{h} ({mp:.1f} MP)")
+    # Test adjustment
+    print("\n2. Testing adjustment...")
+    preview_filename = processor.adjust_crop('2x3', x_offset=10, y_offset=-5)
+    print(f"Adjustment preview filename: {preview_filename}")
     
-    print("\n✅ Memory optimization ready for Render deployment!")
+    # Test batch processing
+    print("\n3. Testing batch processing...")
+    adjustments = {
+        '2x3': {'x_offset': 10, 'y_offset': -5},
+        '3x4': {'x_offset': 0, 'y_offset': 20}
+    }
+    output_files = processor.process_all_ratios(adjustments)
+    print(f"Created {len(output_files)} output files")
+    
+    # Cleanup test files
+    import shutil
+    if os.path.exists("test_output"):
+        shutil.rmtree("test_output")
+    
+    print("\n✅ Image Processor test completed successfully!")
 
 
 if __name__ == "__main__":
-    test_memory_optimization()
+    test_image_processor()
