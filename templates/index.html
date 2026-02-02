@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aspect Ratio Automator | Digital Art Sellers Tool</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1><i class="fas fa-crop-alt"></i> Aspect Ratio Automator</h1>
+            <p class="subtitle">Professional formatting tool for digital art sellers</p>
+        </header>
+
+        <!-- Upload Zone -->
+        <div class="upload-zone" id="uploadZone">
+            <div class="upload-content">
+                <i class="fas fa-cloud-upload-alt fa-3x"></i>
+                <h2>Drag & Drop Your Master Image</h2>
+                <p>Supports JPG, PNG, TIFF up to 50MB</p>
+                <p class="upload-hint">300 DPI recommended for print quality</p>
+                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                    <i class="fas fa-folder-open"></i> Browse Files
+                </button>
+                <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.tiff,.tif" hidden>
+            </div>
+        </div>
+
+        <!-- DPI Warning -->
+        <div id="dpiWarning" class="dpi-warning hidden">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span id="warningText"></span>
+        </div>
+
+        <!-- Preview Grid -->
+        <div class="grid-container hidden" id="previewGrid">
+            <h2>Preview Ratios <span class="dimensions-hint">(Target print dimensions at 300 DPI)</span></h2>
+            <div class="grid">
+                <!-- Ratios will be populated by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Adjustment Modal -->
+        <div class="modal hidden" id="adjustmentModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Adjust Crop Position</h3>
+                    <button class="close-modal" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="adjustment-container">
+                        <div class="image-container">
+                            <img id="modalImage" src="" alt="Adjustment Preview">
+                            <div class="crop-overlay"></div>
+                        </div>
+                        <div class="controls">
+                            <div class="slider-group">
+                                <label>Horizontal Position</label>
+                                <input type="range" id="xSlider" min="-100" max="100" value="0" class="slider">
+                                <div class="slider-value">Center</div>
+                            </div>
+                            <div class="slider-group">
+                                <label>Vertical Position</label>
+                                <input type="range" id="ySlider" min="-100" max="100" value="0" class="slider">
+                                <div class="slider-value">Center</div>
+                            </div>
+                            <div class="modal-buttons">
+                                <button class="btn btn-secondary" onclick="resetAdjustment()">
+                                    <i class="fas fa-undo"></i> Reset
+                                </button>
+                                <button class="btn btn-primary" onclick="saveAdjustment()">
+                                    <i class="fas fa-save"></i> Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Download Section -->
+        <div class="download-section hidden" id="downloadSection">
+            <button class="btn btn-download" onclick="downloadAll()">
+                <i class="fas fa-file-archive"></i> Download All (ZIP)
+            </button>
+            <p class="download-note">
+                Includes all 5 ratio images + Printing_Guide.pdf
+            </p>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Aspect Ratio Automator v1.0 • Made for Digital Art Sellers</p>
+            <p class="footer-info">
+                <i class="fas fa-info-circle"></i> All images processed at 300 DPI with original color profiles preserved
+            </p>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay hidden" id="loadingOverlay">
+        <div class="spinner"></div>
+        <p>Processing Image...</p>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
